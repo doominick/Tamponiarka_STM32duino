@@ -1,31 +1,33 @@
 #include <AccelStepper.h>
-#include <LiquidCrystal.h>
 
 // The X Stepper pins
-#define STEPPER1_DIR_PIN PB12
-#define STEPPER1_STEP_PIN PB13
+#define STEPPER_X_DIR_PIN PB12
+#define STEPPER_X_STEP_PIN PB13
+#define STEPPER_X_ENABLE_PIN PA8
 
 #define END_STOP_PIN_X PB10
 
 // The Y Stepper pins
-#define STEPPER2_DIR_PIN PB14
-#define STEPPER2_STEP_PIN PB15
+#define STEPPER_Y_DIR_PIN PB14
+#define STEPPER_Y_STEP_PIN PB15
+#define STEPPER_Y_ENABLE_PIN PA9
 
 #define END_STOP_PIN_Y PB11
 
 #define LED PC13
 
 #define MANUAL_MODE_BUTTON PB1
+#define FOOT_SWITCH PB0
 
 #define JOG_X_PIN PA0
 #define JOG_Y_PIN PA1
 #define JOG_BUTTON PA2
 
-// Define some steppers and the pins the will use
-AccelStepper stepper1(AccelStepper::DRIVER, STEPPER1_STEP_PIN, STEPPER1_DIR_PIN);
-AccelStepper stepper2(AccelStepper::DRIVER, STEPPER2_STEP_PIN, STEPPER2_DIR_PIN);
+#define SPEED_POT_PIN PA3
 
-LiquidCrystal lcd(PA8, PA9, PB6, PB7, PB8, PB9);
+// Define some steppers and the pins the will use
+AccelStepper stepper_x(AccelStepper::DRIVER, STEPPER_X_STEP_PIN, STEPPER_X_DIR_PIN);
+AccelStepper stepper_y(AccelStepper::DRIVER, STEPPER_Y_STEP_PIN, STEPPER_Y_DIR_PIN);
 
 int fullSteps1 = 370;
 int fullSteps2 = 1200;
@@ -33,7 +35,13 @@ int microSteps = 4;
 long distance1 = fullSteps1*microSteps;
 long distance2 = fullSteps2*microSteps;
 
-volatile bool manualMode = true;
+volatile bool modeButtonPressed = false;
+
+bool debounceModeButton = false;
+
+bool manualMode = false;
+
+bool footSwitchMode = true;
 
 bool ledState = false;
 
@@ -46,11 +54,32 @@ bool jogButtonState;
 int xValue = 0;
 int yValue = 0;
 
-byte lcdRefreshTimer = 0;
-
 unsigned long currentTime = 0;
 unsigned long lastDebounceTime = 0;
-byte debounceDelay = 50;
+byte debounceDelay = 150;
+
+void handleSwitchModeInterrupt()
+{
+  modeButtonPressed = true;
+}
+
+void checkIfModeButtonPressed()
+{
+//  if(digitalRead(MANUAL_MODE_BUTTON) == HIGH) modeButtonPressed = false;
+//  if(modeButtonPressed)
+//  {
+//    lastDebounceTime = millis();
+//    modeButtonPressed = false;
+//    debounceModeButton = true;
+//  }
+//  if((debounceModeButton && (millis() - lastDebounceTime) > debounceDelay))
+//  {
+//    switchMode();
+//    debounceModeButton = false;
+//    Serial.print("Manual mode: ");
+//    Serial.println(manualMode ? "ON" : "OFF");
+//  }
+}
 
 void switchMode()
 {
@@ -59,62 +88,71 @@ void switchMode()
   digitalWrite(LED, ledState);
 }
 
+boolean pedalConnected()
+{
+  return digitalRead(MANUAL_MODE_BUTTON);
+}
+
+boolean footSwitchPressed()
+{
+//  if(!footSwitchMode) return true;
+//  if(footSwitchMode && digitalRead(FOOT_SWITCH) == LOW) return true;
+//  return false;
+
+//  return (footSwitchMode && (!digitalRead(FOOT_SWITCH)));
+  if (!pedalConnected()) return true;
+  return !digitalRead(FOOT_SWITCH);
+//  if(digitalRead(FOOT_SWITCH) == LOW) return true;
+//  return false;
+}
+
+boolean xEndStopTriggered()
+{
+  if(digitalRead(END_STOP_PIN_X) == LOW) return true;
+  return false;
+}
+
+boolean yEndStopTriggered()
+{
+  if(digitalRead(END_STOP_PIN_Y) == LOW) return true;
+  return false;
+}
+
 void setup()
 {  
+  Serial.begin(9600);
+  delay(5000);
 
-    stepper1.setMinPulseWidth(38);
-    stepper1.setMaxSpeed(2000.0*microSteps);
-    stepper1.setAcceleration(6000.0*microSteps);
+    stepper_x.setMinPulseWidth(38);
+    stepper_x.setMaxSpeed(2000.0*microSteps);
+    stepper_x.setAcceleration(6000.0*microSteps);
 
-    stepper2.setMinPulseWidth(54);
-    stepper2.setMaxSpeed(3000.0*microSteps);
-    stepper2.setAcceleration(12000.0*microSteps);
-
-    lcd.begin(16, 2);
-
-    lcd.print("Tamponiarka V0.9");
-
-    delay(3000);
-
-    lcd.clear();
+    stepper_y.setMinPulseWidth(54);
+    stepper_y.setMaxSpeed(3000.0*microSteps);
+    stepper_y.setAcceleration(12000.0*microSteps);
 
     pinMode(END_STOP_PIN_X, INPUT_PULLUP);
     pinMode(END_STOP_PIN_Y, INPUT_PULLUP);
-    pinMode(LED, OUTPUT);
+    pinMode(FOOT_SWITCH, INPUT_PULLUP);
     pinMode(MANUAL_MODE_BUTTON, INPUT_PULLUP);
     pinMode(JOG_BUTTON, INPUT_PULLUP);
+    
     pinMode(JOG_X_PIN, INPUT);
     pinMode(JOG_Y_PIN, INPUT);
+    pinMode(SPEED_POT_PIN, INPUT);
+    
+    pinMode(LED, OUTPUT);
+    pinMode(STEPPER_X_ENABLE_PIN, OUTPUT);
+    pinMode(STEPPER_Y_ENABLE_PIN, OUTPUT);
 
-    attachInterrupt(MANUAL_MODE_BUTTON, switchMode, FALLING);
+    digitalWrite(STEPPER_X_ENABLE_PIN, LOW);
+    digitalWrite(STEPPER_Y_ENABLE_PIN, LOW);
+    digitalWrite(LED, ledState);
+
+    //attachInterrupt(MANUAL_MODE_BUTTON, handleSwitchModeInterrupt, FALLING);
 
     currentTime = millis();
 
-}
-
-void homeY()
-{
-  lcd.clear();
-  lcd.print("Homing Y");
-  stepper2.setMaxSpeed(350*microSteps);
-  stepper2.move(8000*microSteps);
-  while (digitalRead(END_STOP_PIN_Y) == HIGH && stepper2.isRunning())
-  {
-    stepper2.run();
-  }
-  stepper2.setCurrentPosition(0);
-  stepper2.setMaxSpeed(3000*microSteps);
-}
-
-void homeX()
-{
-  stepper1.setMaxSpeed(100*microSteps);
-  stepper1.move(4000*microSteps);
-  while (digitalRead(END_STOP_PIN_X) == HIGH && stepper1.isRunning())
-  {
-    stepper1.run();
-  }
-  stepper2.setCurrentPosition(0);
 }
 
 int joystickValue(int pin)
@@ -128,62 +166,96 @@ int joystickValue(int pin)
   return analogValue*microSteps;
 }
 
-void setYDistance()
+unsigned int speedPotValue()
 {
-  if (!yHomed)
-  {
-    homeY();
-    yHomed = true;
-  } else
-  {
-    distance2 = stepper2.currentPosition();
+  unsigned int analogValue = 0;
+  unsigned int sumAnalogValue = 0;
+  unsigned int maxAnalogValue = 0;
+  unsigned int minAnalogValue = 4095;
+  for(int i=0;i<10;i++){
+    analogValue = analogRead(SPEED_POT_PIN);
+    sumAnalogValue += analogValue;
+    if (analogValue > maxAnalogValue) analogValue=maxAnalogValue;
+    if (analogValue < minAnalogValue) analogValue=minAnalogValue;
   }
+  sumAnalogValue = sumAnalogValue - maxAnalogValue - minAnalogValue;
+  analogValue = sumAnalogValue / 8;
+  analogValue = constrain(analogValue, 400, 3700);
+  analogValue = map(analogValue, 400, 3700, 5, 100);
+  return analogValue;
 }
+
+void homeY()
+{
+  Serial.println("Y homing started");
+  stepper_y.setMaxSpeed(350*microSteps);
+  stepper_y.move(8000*microSteps);
+  while (!yEndStopTriggered() && stepper_y.isRunning())
+  {
+    checkIfModeButtonPressed();
+    stepper_y.run();
+  }
+  stepper_y.setCurrentPosition(0);
+  
+  stepper_y.setMaxSpeed(30*speedPotValue()*microSteps);
+  Serial.println("Y homing finished");
+}
+
+void homeX()
+{
+  Serial.println("X homing started");
+  stepper_x.setMaxSpeed(100*microSteps);
+  stepper_x.move(4000*microSteps);
+  while (!xEndStopTriggered() && stepper_x.isRunning())
+  {
+    checkIfModeButtonPressed();
+    stepper_x.run();
+  }
+  stepper_x.setCurrentPosition(0);
+  stepper_x.setMaxSpeed(20*speedPotValue()*microSteps);
+  Serial.println("X homing finished");
+}
+
+//void setYDistance()
+//{
+//  if (!yHomed)
+//  {
+//    homeY();
+//    yHomed = true;
+//  } else
+//  {
+//    distance2 = stepper_y.currentPosition();
+//  }
+//}
 
 void loop()
 {
 if (manualMode){
+
+  checkIfModeButtonPressed();
+  stepper_x.setSpeed(xValue);
+  stepper_y.setSpeed(yValue);
   
-  stepper1.setSpeed(xValue);
-  stepper2.setSpeed(yValue);
+  if (xValue >= 0) stepper_x.moveTo(10000*microSteps);
+  else stepper_x.moveTo(-10000*microSteps);
+  if (yValue >= 0) stepper_y.moveTo(10000*microSteps);
+  else stepper_y.moveTo(-10000*microSteps);
   
-  if (xValue >= 0) stepper1.moveTo(10000*microSteps);
-  else stepper1.moveTo(-10000*microSteps);
-  if (yValue >= 0) stepper2.moveTo(10000*microSteps);
-  else stepper2.moveTo(-10000*microSteps);
+  if (digitalRead(END_STOP_PIN_X)) stepper_x.runSpeed();
+  else if (xValue < 0) stepper_x.runSpeed();
   
-  if (digitalRead(END_STOP_PIN_X)) stepper1.runSpeed();
-  else if (xValue < 0) stepper1.runSpeed();
-  
-  if (digitalRead(END_STOP_PIN_Y)) stepper2.runSpeed();
-  else if (yValue < 0) stepper2.runSpeed();
+  if (digitalRead(END_STOP_PIN_Y)) stepper_y.runSpeed();
+  else if (yValue < 0) stepper_y.runSpeed();
   
   if ((millis() - currentTime) > 10)
   {
     currentTime = millis();
     
     xValue = joystickValue(JOG_X_PIN);
-    yValue = joystickValue(JOG_Y_PIN);
-    
-    lcdRefreshTimer++;
-
-    if (lcdRefreshTimer > 2) {
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("X: ");
-      lcd.print(stepper1.currentPosition());
-      lcd.setCursor(10, 0);
-      lcd.print(stepper1.speed());
-      //lcd.print(xValue);
-      lcd.setCursor(0, 1);
-      lcd.print("Y: ");
-      lcd.print(stepper2.currentPosition());
-      lcd.setCursor(10, 1);
-      lcd.print(stepper2.speed());
-      //lcd.print(yValue);
-      lcdRefreshTimer = 0;
-    }
+    yValue = joystickValue(JOG_Y_PIN);    
   }
+
+  
 
 //  bool jogButtonReading = digitalRead(JOG_BUTTON);
 //
@@ -202,55 +274,97 @@ if (manualMode){
   
 } else
 {  
-//  while (digitalRead(END_STOP_PIN_X) == HIGH)
-//  {
-//    homeX();
-//  }
-//
-
+  
   while (digitalRead(END_STOP_PIN_Y) == HIGH)
   {
     homeY();
   }
 
-  lcd.clear();
-  lcd.print("Drukowanie");
+  stepper_y.moveTo(-distance2);
+  stepper_y.setMaxSpeed(30*speedPotValue()*microSteps);
+  Serial.println("Moving up");
 
-  stepper2.moveTo(-distance2);
-    
   do{
-    stepper2.run();
-  }while ((stepper2.currentPosition() > -distance2) || !manualMode);
+    checkIfModeButtonPressed();
+    stepper_y.run();
+  }while ((stepper_y.currentPosition() > -distance2) && !manualMode);
 
-  stepper1.moveTo(-distance1);
+  while (digitalRead(END_STOP_PIN_X) == HIGH)
+  {
+    homeX();
+  }
+
+  stepper_x.moveTo(-distance1);
+  stepper_x.setMaxSpeed(20*speedPotValue()*microSteps);
+  Serial.println("Moving over template");
   
   do{
-    stepper1.run();
-  }while ((stepper1.currentPosition() > -distance1) || !manualMode);
+    checkIfModeButtonPressed();
+    stepper_x.run();
+  }while ((stepper_x.currentPosition() > -distance1) && !manualMode);
 
-  stepper2.moveTo(0);  
+  Serial.println("Waiting for foot switch");
 
-  do{
-    stepper2.run();
-  }while ((stepper2.currentPosition() < 0) || !manualMode);
+  while(!footSwitchPressed()){}
 
-  stepper2.moveTo(-distance2);
+  Serial.println("Foot switch pressed");
 
-  do{
-    stepper2.run();
-  }while ((stepper2.currentPosition() > -distance2) || !manualMode);
-
-  stepper1.moveTo(0);
+  stepper_y.moveTo(0);
+  stepper_y.setMaxSpeed(30*speedPotValue()*microSteps);
+  Serial.println("Moving down");
 
   do{
-    stepper1.run();
-  }while ((stepper1.currentPosition() < 0) || !manualMode);
+    if(yEndStopTriggered())
+    {
+      Serial.println("Y endstop triggered");
+      stepper_y.setCurrentPosition(0);
+    }
+    checkIfModeButtonPressed();
+    stepper_y.run();
+  }while ((stepper_y.currentPosition() < 0) && !manualMode);
 
-  stepper2.moveTo(0);
+  stepper_y.moveTo(-distance2);
+  stepper_y.setMaxSpeed(30*speedPotValue()*microSteps);
+  Serial.println("Moving up");
 
   do{
-    stepper2.run();
-  }while ((stepper2.currentPosition() < 0) || !manualMode);
+    checkIfModeButtonPressed();
+    stepper_y.run();
+  }while ((stepper_y.currentPosition() > -distance2) && !manualMode);
+
+  stepper_x.moveTo(0);
+  stepper_x.setMaxSpeed(20*speedPotValue()*microSteps);
+  Serial.println("Moving over detail");
+
+  do{
+    if(xEndStopTriggered())
+    {
+      Serial.println("X endstop triggered");
+      stepper_x.setCurrentPosition(0);
+    }    
+    checkIfModeButtonPressed();
+    stepper_x.run();
+  }while ((stepper_x.currentPosition() < 0) && !manualMode);
+
+  Serial.println("Waiting for foot switch");
+
+  while(!footSwitchPressed()){}
+
+  Serial.println("Foot switch pressed");
+
+  stepper_y.moveTo(0);
+  stepper_y.setMaxSpeed(30*speedPotValue()*microSteps);
+  Serial.println("Moving down");
+
+  do{
+    if(yEndStopTriggered())
+    {
+      Serial.println("Y endstop triggered");
+      stepper_y.setCurrentPosition(0);
+    }    
+    checkIfModeButtonPressed();
+    stepper_y.run();
+  }while ((stepper_y.currentPosition() < 0) && !manualMode);
 
 }   
 }
