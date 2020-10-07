@@ -123,6 +123,12 @@ void setup()
   Serial.begin(9600);
   delay(5000);
 
+  Serial.println("Tamponiarka startuje...");
+  Serial.print("Podaj ilosc krokow X: ");
+  while (Serial.available() == 0);
+  fullSteps1 = Serial.parseInt();
+  Serial.println(fullSteps1);
+
     stepper_x.setMinPulseWidth(38);
     stepper_x.setMaxSpeed(2000.0*microSteps);
     stepper_x.setAcceleration(6000.0*microSteps);
